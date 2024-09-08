@@ -1,0 +1,925 @@
+---
+title: "CS5801 Coursework Proforma"
+author: "1833927"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_notebook: default
+  pdf_document: default
+version: 1
+---
+
+```{r}
+
+#load required libraries
+library(validate)
+library(Hmisc)
+library(cowplot)
+library(ggplot2)
+library(modeest)
+
+```
+
+
+# 1. Organise and clean the data
+
+## 1.1 Subset the data into the specific dataset allocated
+
+```{r}
+
+SID <- 1833927                  # Assigning my student id to SID 
+SIDoffset <- (SID %% 50) + 1    # Your SID mod 50 + 1
+
+load("car-analysis-data.Rda")
+# Now subset the car data set
+# Pick every 50th observation starting from your offset
+ cars_df<- cars.analysis[seq(from=SIDoffset,to=nrow(cars.analysis),by=50),]
+```
+
+## 1.2 Data quality analysis plan 
+ 
+The initial step to assess data quality involves exploring and analysing the structure of the data frame. This is done to ensure that the variables are classified correctly into numerical or categorical types. There are 16 columns in this data frame out of which 9 including fuel, drivetrain, automatic_transmission, damaged, first_owner, navigation_system, bluetooth, third_row_seating, heated_seats are binary values therefore it is necessary to convert them into factors to represent categorical variables. Then the factor levels are checked to find issues such as unintentional synonyms or incorrect number of levels. Then we will look at identifying other data quality issues that include missing data, valid range, outliers and negative values by defining quality checking rules for each column.
+
+## 1.3 Data quality analysis findings 
+
+```{r}
+str(cars_df) #view the structure of cars_df to ensure that the column data types are appropriately classified
+
+```
+
+These columns need to be converted into factors: brand, automatic_transmission, fuel, drivetrain, damaged, first_owner, navigation_system, bluetooth, third_row_seating and heated_seats. 
+
+```{r}
+#convert variables into factors
+
+cars_df$brand <- as.factor(cars_df$brand)
+cars_df$fuel <- as.factor(cars_df$fuel)
+cars_df$drivetrain <- as.factor(cars_df$drivetrain)
+cars_df$automatic_transmission <- as.factor(cars_df$automatic_transmission)
+cars_df$damaged <- as.factor(cars_df$damaged)
+cars_df$first_owner <- as.factor(cars_df$first_owner)
+cars_df$navigation_system<- as.factor(cars_df$navigation_system)
+cars_df$bluetooth <- as.factor(cars_df$bluetooth)
+cars_df$third_row_seating <- as.factor(cars_df$third_row_seating)
+cars_df$heated_seats <- as.factor(cars_df$heated_seats)
+
+str(cars_df) #check if the variables are converted to factors 
+```
+Now, the categorical variables are successfully converted to factors with the levels.
+
+Next, the quality checking rules for each column are defined:
+
+-The valid factors for Fuel are “Diesel”,“Electric”, "GPL", "Hybrid", "Petrol", "Unknown"
+-The valid factors for drivetrain are "Four-wheel Drive","Front-wheel Drive", "Rear-wheel Drive", "Unknown"
+-The values of mileage, max mpg and price is greater than 0
+-There are no missing values in max_mpg, min_mpg, engine_size, damaged and first_owner
+-The min_mpg is less than max_mpg
+
+```{r}
+# Define the rules for {validate}
+
+cars.rules <- validator("Fuel" = is.element(fuel,c("Diesel","Electric", "GPL", "Hybrid", "Petrol", "Unknown")),
+                          "DriveTrain" = is.element(drivetrain,c("Four-wheel Drive","Front-wheel Drive", "Rear-wheel Drive")),
+                          "Mileage" =  mileage > 0,
+                          "Max_mpg in Range" = max_mpg > 0,
+                          "NAs in Engine Size" = engine_size < 10,
+                          "NAs in Damaged"= !is.na(damaged),
+                          "NAs in FirstOwner" = !is.na(first_owner),
+                          "Price in Range" = price > 0,
+                          "Min_mpg is Less Than Max_mpg" = max_mpg >= min_mpg)
+```
+
+```{r}
+# apply these rules to the data set
+
+qual.check <- confront(cars_df,cars.rules)
+summary(qual.check)
+```
+
+```{r}
+#Check the above results in a bar chart
+plot(qual.check, xlab = "")
+```
+This indicates the presence of missing data, i.e. NA, in the columns max_mpg, min_mpg, engine_size, first_owner, and damaged. 
+
+The fuel column has an invalid factor, and the values in the mileage, max_mpg, min_mpg, and engine_size are not within the expected range.
+
+```{r}
+aggregate(qual.check, by="record") # check which row violates the quality checking rules
+
+
+```
+
+Having identified the number of fails, the data cleaning process can be started.
+
+## 1.4 Data cleaning 
+ 
+```{r}
+summary(cars_df) #summarise the data frame and look at each column separately 
+```
+The issues found in the above table is addressed as follows: 
+
+### 1. Invalid levels of fuel 
+
+```{r}
+table(cars_df$fuel) #check the frequencies and the number of levels for fuel
+```
+There is an additional level of "Pertol", so it needs to be converted to "Petrol".
+
+```{r}
+# retrieve rows with invalid levels of fuel
+subset(cars_df, fuel == "Pertol")
+```
+
+```{r}
+#creating a new subset of cars_df to compare values.
+updated_cars <- cars_df
+```
+
+```{r}
+# Replace rows containing "Pertol" with "Petrol"
+updated_cars$fuel[updated_cars$fuel == "Pertol"] <- "Petrol"
+
+updated_cars$fuel <- droplevels(updated_cars$fuel) #drop obsolete levels
+
+# Check the new frequencies by level
+table(updated_cars$fuel)
+```
+
+### 2.Outlier in engine_size column 
+
+There is an extreme value of 350 for engine_size.
+
+```{r}
+# retrieve rows where engine size is 350
+subset(updated_cars, engine_size == 350)
+```
+Since, there is only one row with an outlier of 350 and has numerous missing values, deleting this row would be the best option.
+
+```{r}
+# Delete rows where Engine_Size is 350
+updated_cars <- subset(updated_cars,is.na(engine_size) |engine_size != 350)
+```
+
+### 3.Mileage has an implausible value of 0
+
+```{r}
+# retrieve rows where engine size is 350
+subset(updated_cars, mileage == 0)
+```
+Given that the dataset is for used cars, we assume that it would be implausible for the mileage to be 0. Since, there are only two rows with this issue, omitting them would improve the overall data quality.
+
+```{r}
+# Delete rows where mileage is 0
+updated_cars <- subset(updated_cars, mileage != 0)
+```
+
+### 4. Negative value in the max_mpg column
+
+```{r}
+# retrieve rows where max_mpg has a negative value
+subset(updated_cars, max_mpg < 0)
+```
+
+Based on the understanding that a negative value for the max mpg is not possible, it is assumed that the values are missing and imputed as NA.
+
+```{r}
+#replace negative values with NA
+updated_cars$max_mpg[updated_cars$max_mpg<0]<- NA
+```
+
+### 5. Missingness, i.e. NA values
+
+Check the count of NAs in each column.
+
+```{r}
+colSums(is.na(updated_cars)) #compute the total missing values in each column
+```
+
+There are 54 NAs in the min_mpg column. To impute these values a suitable imputation method needs to be chosen. Consequently, a new data frame will be created to store the imputed values using three methods: mean, median and hot deck imputation.The variable distribution will then be compared before and after imputation to determine which method causes the least significant change.
+
+```{r}
+# create new dataframe to store the imputed values for min_mpg
+
+imputed_minMpg <- data.frame(
+  original = updated_cars$min_mpg,
+  imputed_mean = impute(updated_cars$min_mpg, mean),    # impute values for NA with the mean    
+  imputed_median = impute(updated_cars$min_mpg, median), # impute values for NA with median
+  imputed_random = impute(updated_cars$min_mpg, "random") # impute values for NA with random using hot deck
+)
+imputed_minMpg
+```
+
+```{r}
+
+#Visualising the "imputed_minMpg" dataframe using histograms to check the impact of imputation on min_mpg's distribution
+
+h1 <- ggplot(imputed_minMpg, aes(x = original)) +
+  geom_histogram(fill = "blue", color = "#000000") +
+ labs(x = "Min Mpg", y = "Count", title = "Original Distribution")+
+  theme_classic()
+
+h2 <- ggplot(imputed_minMpg, aes(x = imputed_mean)) +
+  geom_histogram(fill = "green", color = "#000000") +
+  labs(x = "Imputed Mean", y = "Count", title = "Mean-imputed distribution") +
+  theme_classic()
+
+h3 <- ggplot(imputed_minMpg, aes(x = imputed_median)) +
+  geom_histogram(fill = "brown", color = "#000000") +
+  labs(x = "Imputed Median", y = "Count", title = "Median-imputed distribution") +
+  theme_classic()
+
+h4 <- ggplot(imputed_minMpg, aes(x = imputed_random)) +
+  geom_histogram(fill = "pink", color = "#000000") +
+  labs(x = "Imputed Random", y = "Count", title = "Hotdeck-imputed distribution") +
+  theme_classic()
+
+plot_grid(h1, h2, h3, h4, nrow = 2, ncol = 2)
+```
+
+The hotdeck-imputed distribution looks similar to the original one. Therefore, hot deck imputation will be used.
+
+```{r}
+
+# Impute values for NAs with random values using hot deck
+updated_cars$min_mpg <-impute(updated_cars$min_mpg, "random")
+
+```
+
+The same process is repeated for max_mpg.
+
+```{r}
+
+# create new dataframe to store the imputed values for max_mpg
+imputed_maxMpg <- data.frame(
+  original = updated_cars$max_mpg,
+  imputed_mean = impute(updated_cars$max_mpg, mean),    # impute values for NA with the mean    
+  imputed_median = impute(updated_cars$max_mpg, median), # impute values for NA with median
+  imputed_random = impute(updated_cars$max_mpg, "random") # impute values for NA with random using hot deck
+)
+imputed_maxMpg
+```
+
+```{r}
+
+#Visualising the "imputed_maxMpg" dataframe using histograms to check the impact of imputation on min_mpg's distribution
+
+h1 <- ggplot(imputed_maxMpg, aes(x = original)) +
+  geom_histogram(fill = "blue", color = "#000000") +
+ labs(x = "Max Mpg", y = "Count", title = "Original Distribution")+
+  theme_classic()
+
+h2 <- ggplot(imputed_maxMpg, aes(x = imputed_mean)) +
+  geom_histogram(fill = "green", color = "#000000") +
+  labs(x = "Imputed Mean", y = "Count", title = "Mean-imputed distribution") +
+  theme_classic()
+
+h3 <- ggplot(imputed_maxMpg, aes(x = imputed_median)) +
+  geom_histogram(fill = "brown", color = "#000000") +
+  labs(x = "Imputed Median", y = "Count", title = "Median-imputed distribution") +
+  theme_classic()
+
+h4 <- ggplot(imputed_maxMpg, aes(x = imputed_random)) +
+  geom_histogram(fill = "pink", color = "#000000") +
+  labs(x = "Imputed Random", y = "Count", title = "Hotdeck-imputed distribution") +
+  theme_classic()
+
+plot_grid(h1, h2, h3, h4, nrow = 2, ncol = 2)
+```
+
+The hotdeck-imputed distribution looks similar to the original one. Therefore, hot deck imputation will be used.
+
+```{r}
+
+# Impute values for NAs with random values using hot deck
+
+imputed_max_mpg <- impute(updated_cars$max_mpg, "random")
+
+# Ensure the imputed values is greater than or equal to min_mpg
+updated_cars$max_mpg <- pmax(imputed_max_mpg, updated_cars$min_mpg)
+
+```
+
+
+```{r}
+updated_cars[is.na(updated_cars$engine_size),] #check rows with NA in engine_size
+```
+
+The rows where "engine_size" has missing values mostly have fuel types with electric and petrol. Assuming that electric cars do not have traditional engines, we impute the missing values with 0 for electric vehicles. For other fuel types, the engine size is imputed with random numbers.
+
+```{r}
+
+# Impute missing engine sizes for electric vehicles with 0
+updated_cars$engine_size[updated_cars$fuel == "Electric" & is.na(updated_cars$engine_size)] <- 0
+  
+
+updated_cars$engine_size<-impute(updated_cars$engine_size, "random")
+
+#check if there are remaining missing values 
+(paste(" Total of NA values: ", sum(is.na(updated_cars$engine_size))))
+```
+The missing values for damaged and first_owner is imputed using the mode as calculating a mean or median is not meaningful for categorical data.
+
+```{r}
+# retrieve rows where values are NA in damaged
+subset(updated_cars, is.na(damaged)) 
+```
+
+```{r}
+# calculate the mode of damage
+mode <- mlv(updated_cars$damaged, method = "mfv")
+mode
+```
+The mode is 0.
+
+```{r}
+# impute missing values of damaged with 0 (i.e. the mode)
+
+updated_cars$damaged[is.na(updated_cars$damaged)] <- mode 
+
+#check if there are remaining missing values 
+(paste(" Total of NA values: ", sum(is.na(updated_cars$damaged))))
+
+```
+We repeat the same process for first_owner.
+
+```{r}
+# retrieve rows where values are NA in damaged
+subset(updated_cars, is.na(first_owner)) 
+```
+
+```{r}
+# calculate the mode of first_owner
+mode <- mlv(updated_cars$first_owner, method = "mfv")
+mode
+```
+The mode is 1.
+
+```{r}
+# impute missing values of damaged with 0 (i.e. the mode)
+
+updated_cars$first_owner[is.na(updated_cars$first_owner)] <- mode 
+
+#check if there are remaining missing values 
+(paste(" Total of NA values: ", sum(is.na(updated_cars$first_owner))))
+
+```
+
+# 2. Exploratory Data Analysis (EDA)
+
+## 2.1 EDA plan
+
+Firstly, each column will be analysed individually using visual representations for numerical columns through histograms. Categorical columns will be examined by producing frequency tables to display the count of each category within the column. Subsequently, the relationship between the target variable, "price," and other numerical variables will be explored using correlation plots and matrices, while the association between price and categorical variables will be examined through boxplots. The second target variable, "first_owner," will be analysed with other categorical columns using frequency tables. Additionally, the chi-squared test will be used for tables with a count exceeding 5, and the Fisher test will be applied if values are less than 5. Finally, to illustrate the relationship between "first_owner" and numerical columns, box plots will be used.
+
+## 2.2 EDA execution   
+
+### Univariate
+
+```{r}
+#plot histogram for year
+
+ggplot(updated_cars, aes(x = year)) +
+  geom_histogram(fill = "pink", color = "#000000") +
+ labs(x = "Year", y = "Count", title = "Histogram for year of manufacture")+
+  theme_classic()
+
+```
+
+The distribution of year demonstrates outliers and a negative skewness, indicating that majority of cars were manufactured after 2000.
+
+```{r}
+#plot histogram for Mileage
+
+ggplot(updated_cars, aes(mileage)) +
+  geom_histogram(fill = "pink", color = "#000000") +
+ labs(x = "Mileage", y = "Count", title = "Histogram for mileage")+
+  theme_classic()
+```
+
+The distribution for mileage demonstrates a positive skewness indicating that majority of cars have lower mileage.
+
+```{r}
+#plot histogram for Engine Size
+ggplot(updated_cars, aes(engine_size)) +
+  geom_histogram(fill = "pink", color = "#000000") +
+ labs(x = "Engine Size", y = "Count", title = "Histogram for size of engine")+
+  theme_classic()
+```
+
+The histogram shows that majority of cars have an engine size around 2.
+
+```{r}
+#plot histogram for Min MPG
+
+ggplot(updated_cars, aes(min_mpg)) +
+  geom_histogram(fill = "pink", color = "#000000") +
+ labs(x = "Min Mpg", y = "Count", title = "Histogram for min mpg")+
+  theme_classic()
+
+```
+
+The histogram for min_mpg is normally distributed, with few outliers.
+
+```{r}
+#plot histogram for Max MPG
+
+ggplot(updated_cars, aes(max_mpg)) +
+  geom_histogram(fill = "pink", color = "#000000") +
+ labs(x = "Max Mpg", y = "Count", title = "Histogram for max mpg")+
+  theme_classic()
+
+```
+The histogram for max_mpg is normally distributed.
+
+```{r}
+# plot histogram for price
+
+ggplot(updated_cars, aes(price)) +
+  geom_histogram(fill = "pink", color = "#000000") +
+ labs(x = "Price", y = "Count", title = "Histogram for price")+
+  theme_classic()
+
+```
+The histogram for price is normally distributed.
+
+```{r}
+table(updated_cars$brand)
+```
+
+Cadillac and FIAT have the highest number of cars, totaling 22, while Suzuki has the lowest count with 3 cars.
+
+```{r}
+table(updated_cars$fuel)
+```
+372 cars use petrol and fuel type for 2 cars is unknown.
+
+```{r}
+table(updated_cars$automatic_transmission)
+```
+379 cars have automatic transmission whereas 28 cars are manual.
+
+```{r}
+table(updated_cars$drivetrain)
+```
+217 cars are four wheel drive.
+
+```{r}
+table(updated_cars$damaged)
+```
+301 cars are not damaged, while 106 cars are damaged.
+
+```{r}
+table(updated_cars$first_owner)
+```
+214 cars have only one owner, while 193 cars have more owners.
+
+```{r}
+table(updated_cars$navigation_system)
+```
+230 cars do not have a navigation system, while 177 cars are equipped with one.
+
+```{r}
+table(updated_cars$bluetooth)
+```
+364 cars have a bluetooth connection.
+
+```{r}
+table(updated_cars$third_row_seating)
+```
+356 cars do not have a third row seating.
+
+```{r}
+table(updated_cars$heated_seats)
+```
+220 cars do not have heated seats. 
+
+### Exploring the relationship with the target variable
+
+```{r}
+
+#plotting the correlation between the numerical columns and dependent variable price
+
+cor.cars<-subset(updated_cars, select=c("mileage","year", "engine_size", "min_mpg", "max_mpg",  "price") )
+pairs(cor.cars, panel = panel.smooth)
+
+```
+
+The plot shows that price has a negative relation with mileage, positive relation with year and unclear relation with engine_size, min_mpg and max_mpg.
+
+```{r}
+# calculating the correlation between the numerical columns
+cor(cor.cars)
+```
+
+The correlation between price and mileage is -0.57 indicating a negative correlation and the correlation between price and year is 0.57 indicating a positive correlation.
+
+
+```{r}
+#box plot for brand vs price 
+
+ggplot(updated_cars, aes(x = brand, y = price)) +geom_boxplot(fill='#A4A4A4', color="black") + xlab("Brand") + ylab("Price")+
+  ggtitle("Boxplot of Brand vs Price") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+There is variability in price for different brands with few outliers.
+
+```{r}
+#box plot for automatic_transmission`vs price 
+ggplot(updated_cars, aes(x = automatic_transmission, y = price)) +geom_boxplot(fill='#A4A4A4', color="black") + xlab("Automatic Transmission") + ylab("Price") + ggtitle("Boxplot of Transmission vs Price") 
+
+```
+Median price is higher for automatic cars and the other group is negatively skewed.
+
+```{r}
+#box plot for fuel vs price
+
+ggplot(updated_cars, aes(x = fuel, y = price)) +geom_boxplot(fill='#A4A4A4', color="black") + xlab("Fuel") + ylab("Price") + ggtitle("Boxplot of Fuel Type vs Price")
+
+```
+The median price of hybrid cars is higher than other cars. There is greater variability of prices for diesel and GPL cars.
+
+```{r}
+#box plot for drivetrain vs price 
+
+ggplot(updated_cars, aes(x = drivetrain, y = price)) +geom_boxplot(fill='#A4A4A4', color="black") + xlab("Drive Train") + ylab("Price") + ggtitle("Boxplot of Drive Train Type vs Price")
+```
+There are outliers and price for four wheel drive cars is higher.
+
+```{r}
+#box plot for damaged vs price 
+
+ggplot(updated_cars, aes(x = damaged, y = price)) +geom_boxplot(fill='#A4A4A4', color="black") + xlab("Damaged") + ylab("Price") + ggtitle("Boxplot of Damaged Cars vs Price")
+
+```
+
+Price is higher for undamaged cars.
+
+```{r}
+#box plot for first owner vs price 
+ggplot(updated_cars, aes(x = first_owner, y = price)) +geom_boxplot(fill='#A4A4A4', color="black") + xlab("First Owner") + ylab("Price") + ggtitle("Boxplot of Owner vs Price")
+
+```
+
+Prices for single owned cars is higher.
+
+```{r}
+#box plot for navigation system vs price 
+
+ggplot(updated_cars, aes(x = navigation_system, y = price)) +geom_boxplot(fill='#A4A4A4', color="black") + xlab("Navigation System") + ylab("Price") + ggtitle("Boxplot of cars with navigation system vs Price")
+
+```
+
+Cars without a navigation system has lower prices.
+
+```{r}
+# box plot for bluetooth vs price 
+
+ggplot(updated_cars, aes(x = bluetooth, y = price)) +geom_boxplot(fill='#A4A4A4', color="black") + xlab("Bluetooth") + ylab("Price") + ggtitle("Boxplot of Cars with Bluetooth vs Price")
+
+```
+Median price for cars with bluetooth is higher.
+
+```{r}
+# box plot for third_row_seating vs price
+
+ggplot(updated_cars, aes(x = third_row_seating, y = price)) +geom_boxplot(fill='#A4A4A4', color="black") + xlab("Third Row Seating") + ylab("Price") + ggtitle("Boxplot of Cars with Third Row Seating vs Price")
+
+```
+There are some outliers and higher price in cars with a third row seating.
+
+```{r}
+# box plot for heated_seats vs price 
+
+ggplot(updated_cars, aes(x = heated_seats, y = price)) +geom_boxplot(fill='#A4A4A4', color="black") + xlab("Heated Seats") + ylab("Price") + ggtitle("Boxplot of Cars with Heated Seats vs Price")
+
+```
+The price of cars with heated seats is higher.
+
+```{r}
+#Explore the relationship of first_owner variable with automatic_transmission
+
+# Creating a contingency table
+t1 <- table(updated_cars$first_owner, updated_cars$automatic_transmission)
+
+# Displaying the contingency table
+print(t1)
+
+# Performing a chi-square test
+chisq.test(t1)
+```
+A p-value of 0.6327 suggests that there is no significant association between first_owner and automatic_transmission.
+
+```{r}
+#Explore the relationship of first_owner variable with fuel
+
+# Creating a contingency table
+t2 <- table(updated_cars$first_owner, updated_cars$fuel)
+
+# Displaying the contingency table
+print(t2)
+
+# Performing a chi-square test
+fisher.test(t2)
+
+```
+
+A p-value of 0.89 suggests that there is no significant association between first_owner and automatic_fuel.
+
+```{r}
+#Explore the relationship of first_owner variable with drivetrain
+
+# Creating a contingency table
+t3 <- table(updated_cars$first_owner,updated_cars$drivetrain)
+
+# Displaying the contingency table
+print(t3)
+
+# Performing a chi-square test
+fisher.test(t3)
+
+```
+A p-value of 0.80 suggests that there is no significant association between first_owner and drivetrain.
+
+```{r}
+#Explore the relationship of first_owner variable with damaged
+
+# Creating a contingency table
+t4 <- table(updated_cars$first_owner, updated_cars$damaged)
+
+# Displaying the contingency table
+print(t4)
+
+# Performing a chi-square test
+chisq.test(t4)
+
+```
+The p-value is significant suggesting that there is significant association between first_owner and damaged.
+
+```{r}
+#Explore the relationship of first_owner variable with navigation_system
+
+# Creating a contingency table
+t5 <- table(updated_cars$first_owner, updated_cars$navigation_system)
+
+# Displaying the contingency table
+print(t5)
+
+# Performing a chi-square test
+chisq.test(t5)
+
+```
+A p-value of 0.62 suggests that there is no significant association between first_owner and navigation_system.
+
+```{r}
+#Explore the relationship of first_owner variable with bluetooth
+
+# Creating a contingency table
+t6 <- table(updated_cars$first_owner, updated_cars$bluetooth)
+
+# Displaying the contingency table
+print(t6)
+
+# Performing a chi-square test
+chisq.test(t6)
+```
+A p-value of 0.31 suggests that there is no significant association between first_owner and bluetooth.
+
+```{r}
+#Explore the relationship of first_owner variable with third_row_seating
+
+# Creating a contingency table
+t7 <- table(updated_cars$first_owner, updated_cars$third_row_seating)
+
+# Displaying the contingency table
+print(t7)
+
+# Performing a chi-square test
+chisq.test(t7)
+
+```
+A p-value of 1 suggests that there is no significant association between first_owner and third_row_seating.
+
+```{r}
+#Explore the relationship of first_owner variable with heated_seats
+
+# Creating a contingency table
+t8 <- table(updated_cars$first_owner, updated_cars$heated_seats)
+
+# Displaying the contingency table
+print(t8)
+
+# Performing a chi-square test
+chisq.test(t8)
+          
+```
+A p-value of 0.3 suggests that there is no significant association between first_owner and heated_seats.
+
+```{r}
+#box plot for first owner vs year
+
+ggplot(updated_cars, aes(x = first_owner, y = year, fill=first_owner)) +
+  geom_boxplot() + 
+    xlab("First owner") + ylab("Year")
+
+```
+Cars with a single owner have a higher median year compared to cars with more owners. There is greater variability in the second group and the outliers indicates that there are cars with early production years.
+
+```{r}
+#box plot for first owner vs mileage
+
+ggplot(updated_cars, aes(x = first_owner, y = mileage, fill=first_owner)) +
+  geom_boxplot() + 
+  xlab("First owner") + ylab("Mileage")
+```
+There are few outliers and cars with more owners have a higher mileage and more variability compared to cars with one owner.
+
+```{r}
+#box plot for first owner vs engine size
+
+ggplot(updated_cars, aes(x = first_owner, y = engine_size, fill=first_owner)) +
+  geom_boxplot() + 
+    xlab("First Owner") + ylab("Engine Size")
+```
+
+The median engine size for cars with a single owner is lower. The distribution for the other group is positively skewed, indicating that a significant portion of this group have bigger engine sizes. 
+
+```{r}
+#box plot for first owner vs min_mpg
+ggplot(updated_cars, aes(x = first_owner, y = min_mpg, fill=first_owner)) +
+  geom_boxplot() + 
+    xlab("First owner") + ylab("Min Mpg")
+```
+
+There are few outliers but the median min mpg is slightly higher for cars with one owner.
+
+```{r}
+#box plot for first owner vs max mpg
+
+ggplot(updated_cars, aes(x = first_owner, y = max_mpg, fill=first_owner)) +
+  geom_boxplot() + 
+    xlab("First owner") + ylab("Max Mpg")
+```
+
+The median max mpg is similar for both groups. Cars with one owner have more outliers and less variability compared to the other group.
+
+```{r}
+#box plot for first owner vs price
+ggplot(updated_cars, aes(x = first_owner, y = price, fill=first_owner)) +
+  geom_boxplot() + 
+    xlab("First owner") + ylab("Price")
+```
+
+The median price of cars with one owner is higher than cars with more than one owner.
+
+## 2.3 EDA summary of results 
+
+The histograms demonstrate that the numerical columns min_mpg, max_mpg, and price are normally distributed. The correlation matrix reveals a negative correlation between price and mileage, suggesting that an increase in mileage is associated with a decrease in price. Similarly, there is a positive correlation between price and the year, suggesting that cars manufactured in recent years tend to have higher prices. Furthermore, examining box plots of price against categorical columns shows variations within the groups, indicating a relationship between price and the respective column.These columns include brand, drivetrain, automatic_transmission, navigation_system, damaged, first_owner, Bluetooth, third_row_seating, heated_seats and fuel.Furthermore, using the chi-squared test reveals a significant association between "first_owner" and only one categorical column, "damaged" as the p-value is significant. Finally, the box plots illustrate that the variations in the numerical columns mileage, price, and year between the groups of "first_owner" indicate a relationship among them.
+
+## 2.4 Additional insights and issues 
+
+An issue identified during EDA is the presence of potential outliers in most columns. This may violate the assumption of normally distributed residuals and homoscedasticity in linear regression. Similarly, the numerical columns, mileage, and year, do not have a normal distribution, posing a challenge during modelling in the residuals plot, as it also violates the normality assumption.
+
+# 3. Modelling
+
+## 3.1 Explain your analysis plan 
+
+The results in section 2.3 show a significant correlation between the target variable "price" and both numerical variables (mileage and year) and categorical variables (brand, drivetrain, automatic_transmission, fuel, navigation_system, damaged, first_owner, bluetooth, third_row_seating, and heated_seats). These variables will be used as explanatory variables for predicting the price. Moreover, given that the explanatory variables comprise a mix of both numerical and categorical variables and the dependent variable is numerical, the chosen modelling approach is multiple linear regression. The findings in section 2.4  highlight some potential issues that could pose challenges to the model. If there is such a case, for e.g., the presence of heteroscedasticity, it will addressed by transforming the dependent variable using a log.
+
+## 3.2 Build a model for car price
+
+### Model 1
+
+This is the maximal model which includes all the explanatory variables.
+
+```{r}
+model.1<-lm(price~mileage+year+brand+drivetrain+automatic_transmission+navigation_system+damaged+first_owner+bluetooth+third_row_seating+heated_seats + fuel , data = updated_cars)
+
+summary(model.1)
+```
+The Multiple R-squared value of 0.79 signifies that about 79% of the variability in car prices is explained by the model. Moreover, the F-statistic of 33.06 with a very low p-value (< 2.2e-16) indicates the significance of the model. There are a few coefficients that are significant.
+
+### Model 2
+
+The next step is to build a minimal adequate model by using the step function.
+
+```{r}
+model.2 <- step(model.1)
+summary(model.2)
+
+```
+
+## 3.3 Critique model using relevant diagnostics 
+
+The findings of the model reveal that several significant coefficients influence car prices. The intercept of 1.972e+06 indicates the estimated car price when all other variables are zero is negative. An increase in mileage is associated with a decrease in car price whereas a one-year increase in the manufacturing year also increases the price. Several brand coefficients, such as BMW, Cadillac, Land Rover, Lexus, Maserati, and Porsche positively impact the price, while FIAT and Mitsubishi have negative impacts. Moreover, Front-wheel Drive has a negative impact on car prices, while Rear-wheel Drive and Unknown drivetrain types have positive impacts. Furthermore, features like Automatic transmission, Navigation System, and Third Row Seating positively influence car prices, while certain fuel types (Electric, GPL, Hybrid, and Petrol) have negative impacts. The Multiple R-squared value of 0.79 signifies that about 79% of the variability in car prices is explained by the model. Moreover, the F-statistic of 34.7 with a very low p-value (< 2.2e-16) indicates the significance of the model. 
+
+There are few issues with the model that are identified using the residual plot. Firstly, a warning message highlights that observation 335 has a leverage value of 1, signifying that this particular observation heavily influences the coefficients of the regression model. Secondly, the residuals plots reveal the presence of heteroskedasticity as the spread of residuals is distributed unevenly across the predicted values. Lastly, the QQ plot displays a large amount of outliers as the points deviate from the line, suggesting that the residuals are not normally distributed.
+
+```{r}
+# check the residuals plot
+plot(model.2)
+```
+## 3.4 Suggest and implement improvements to your model 
+
+Firstly, we will handle the warning of the leverage value in row 335. 
+```{r}
+# retrieve row 335
+updated_cars[335, ]
+```
+This row reveals an outlier in the manufacturing year (1978), suggesting an extreme value. Therefore, this row will be omitted to check whether it improves the model.
+
+```{r}
+# Delete rows where mileage is 0
+updated_cars <- subset(updated_cars, year != 1978)
+```
+
+To mitigate the issues related to heteroscedasticity and outliers, a log transformation to the price variable will be applied. This is done to address non-constant variance of residuals.
+
+### Model 3
+
+Start by applying the log transformation in the maximal model. 
+
+```{r}
+model.3 <- lm(log(price) ~ mileage+year+brand+drivetrain+automatic_transmission+navigation_system+damaged+first_owner+bluetooth+third_row_seating+heated_seats + fuel , data = updated_cars)
+
+summary(model.3)
+plot(model.3)
+```
+### Model 4
+
+The minimal adequeate model is built using the step function.
+
+```{r}
+
+model.4<-step(model.3)
+summary(model.4)
+
+```
+
+```{r}
+# check the residuals plot
+plot(model.4)
+```
+
+Comparing the models from section 3.2 and 3.3, model 4 is recommended based on several improvements:
+
+1.Multiple R-squared value has increased to 0.85, suggesting that approximately 85% of the variability in the price is explained by the model compared to the earlier model which explaines only 79%.
+
+2.The F-statistic has improved from 34.7 to 56.46 with a low p-value (< 2.2e-16), demonstrating the overall significance of the model. 
+
+3.Despite the presence of outliers in the residuals plot, the tendency of heteroscedasticity has reduced significantly. 
+
+4.The QQ-plot displays better alignment with fewer data points deviating from the model. Additionally, there are no high leverage values.
+
+
+# 4. Modelling another dependent variable 
+
+## 4.1 Model the likelihood of a car being sold by the first owner (using the first_owner variable provided).
+
+The results in section 2.3 show that first owner has a significant relationship with damaged, mileage, price, and year which will used as the explanatory variables. Since, the dependent variable damaged is binary, Logistic Regression will be used to for modelling the relationship.
+
+```{r}
+sale <-glm(updated_cars$first_owner~updated_cars$damaged+updated_cars$mileage+updated_cars$year+updated_cars$price, family = binomial)
+summary(sale)
+```
+The coefficients of damaged and year are significant whereas mileage and price are not significant. The AIC value is 485.77.
+
+
+```{r}
+exp(coef(sale))
+
+```
+
+The odds ratios show that the likelihood of a car being sold by the first owner is lower for damaged cars, while an decrease in mileage and a increase in year (i.e., recent manufacture years) are associated with a higher likelihood of a sale.On the other hand, the price of the car does not significantly impact the probability of it being sold by the first owner.
+
+Now, using the step function to build a minimal adequate model
+
+```{r}
+sale.2 <- step(sale)
+summary(sale.2)
+```
+
+In this model, both the values for damaged and year are significant. 
+
+The AIC is also lower at 482.15 compared to the previous model's AIC of 485.77. Therefore, this model will be chosen as it will offers a more straightforward interpretation for assessing the likelihood of a car being sold.
+
+
+```{r}
+exp(coef(sale.2))
+```
+The odds ratio reveal that the likelihood of a car being sold is decreased if it is damaged, and the probability increases with a rise in the production year.
+
+
+The logistic regression equation can be expressed as:
+
+For Damaged = 1:
+$$log(\frac{p}{1-p})=-556.65+(-0.62) \times \text{damaged1}+0.28 \times \text{year}$$
+
+# References  
+
+Associations between variables: Associations between variables Cheatsheet (no date) Codecademy. Available at: https://www.codecademy.com/learn/stats-associations-between-variables/modules/stats-associations-between-variables/cheatsheet (Accessed: 10 November 2023). 
+
+Crawley, M.J. (2015) Statistics: An introduction using R. Chichester: Wiley. 
+
+Schork, J. (2022) Mode imputation (how to impute categorical variables using R), Statistics Globe. Available at: https://statisticsglobe.com/mode-imputation/ (Accessed: 08 December 2023). 
+
+Shepperd, M. (2023) CS5702 Modern Data Book. Available at: https://bookdown.org/martin_shepperd/ModernDataBook/. 
